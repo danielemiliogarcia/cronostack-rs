@@ -59,11 +59,11 @@ fn main() -> ExitCode {
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "-V" | "--version" => {
-                println!("cronostack {}", env!("CARGO_PKG_VERSION"));
+                print_ignoring_errors(&format!("cronostack {}\n", env!("CARGO_PKG_VERSION")));
                 return ExitCode::SUCCESS;
             }
             "-h" | "--help" => {
-                print!("{HELP}");
+                print_ignoring_errors(HELP);
                 return ExitCode::SUCCESS;
             }
             "--smoke-test" => smoke_test = true,
@@ -85,6 +85,17 @@ fn main() -> ExitCode {
             }
         }
     }
+}
+
+/// Writes to stdout without panicking if it's closed. On Windows the app is
+/// a GUI-subsystem program, so a caller may not be listening (`println!`
+/// would panic with "failed printing to stdout").
+fn print_ignoring_errors(text: &str) {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush());
 }
 
 /// Runs the real window against a throwaway data folder (used by CI to

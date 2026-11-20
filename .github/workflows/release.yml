@@ -137,7 +137,9 @@ jobs:
         run: |
           $version = (Get-Content VERSION).Trim()
           ./install.ps1 -Version $version
-          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version) -ne "cronostack $version") { throw "installed binary smoke test failed" }
+          # cronostack.exe is a GUI-subsystem app: PowerShell only waits for it
+          # and captures its output when the output is piped (| Out-String).
+          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $version") { throw "installed binary smoke test failed" }
       - name: Smoke-test automatic release discovery on Unix
         if: ${{ !matrix.windows }}
         shell: bash
@@ -218,7 +220,7 @@ jobs:
               throw "unexpected fake gh command: $($args -join ' ')"
           }
           ./install.ps1
-          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version) -ne "cronostack $env:CRONOSTACK_TEST_VERSION") {
+          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $env:CRONOSTACK_TEST_VERSION") {
               throw "automatic-discovery installer smoke test failed"
           }
       - name: Upload the release archive
@@ -349,6 +351,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "published installer attestation verification failed" }
           }
           & $installer -InstallDir $installDir
-          if ((& "$installDir\cronostack.exe" --version) -ne "cronostack $version") {
+          if ((& "$installDir\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $version") {
               throw "published installer smoke test failed"
           }

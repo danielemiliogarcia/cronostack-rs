@@ -126,6 +126,9 @@ cronostack --smoke-test    open the window, render, check saving, exit 0 on succ
 
 Set `RUST_LOG=cronostack=info` to see logs.
 
+On Windows `cronostack.exe` is a GUI app, so PowerShell only shows its output
+when piped: `cronostack --version | Out-String`.
+
 ## Cargo features
 
 | feature        | default | what it does |
