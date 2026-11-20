@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test the release-tag signing policy
+        shell: bash
+        run: |
+          latest_tag=$(git tag --list --sort=-version:refname \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$' \
+            | head -n 1 || true)
+          if [[ -z "$latest_tag" ]]; then
+            echo "no release tags yet; nothing to verify"
+            exit 0
+          fi
+          ./scripts/verify-release-tag.sh \
+            "$latest_tag" "$(git rev-parse "$latest_tag^{commit}")"
+      - name: Install the release Rust toolchain
+        shell: bash
+        run: |
+          rust_version=$(tr -d '[:space:]' < RUST_RELEASE_VERSION)
+          rustup toolchain install "$rust_version" --profile minimal --component clippy,rustfmt
+          rustup override set "$rust_version"
+      - name: Install ALSA headers (needed to lint the native-audio feature)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
+      - name: Verify release metadata
+        run: ./scripts/verify-release-metadata.sh
+      - name: Check the POSIX installer syntax
+        run: sh -n install.sh
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Test
+        run: cargo test --all-targets --locked
+      - name: Lint
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            os: linux
+            rustflags: ""
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            os: linux
+            rustflags: ""
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            os: macos
+            rustflags: ""
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            os: windows
+            rustflags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the release Rust toolchain
+        shell: bash
+        run: |
+          rust_version=$(tr -d '[:space:]' < RUST_RELEASE_VERSION)
+          rustup toolchain install "$rust_version" --profile minimal --target "${{ matrix.target }}"
+          rustup override set "$rust_version"
+      - name: Build
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Smoke-test the command line
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/cronostack"
+          if [[ "${{ matrix.os }}" == windows ]]; then binary="$binary.exe"; fi
+          test "$("$binary" --version)" = "cronostack $(tr -d '[:space:]' < VERSION)"
+          "$binary" --help >/dev/null
+
+      # The GUI smoke test opens the real window, renders frames and checks
+      # saving. CI machines have no GPU, so a software OpenGL is provided.
+      - name: Install a virtual display and software OpenGL (Linux)
+        if: ${{ matrix.os == 'linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2
+      - name: Install software OpenGL (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        uses: ssciwr/setup-mesa-dist-win@2dfeaebfa514f74c2b8cd8d27108c31486d33e72 # v3.0.0
+        with:
+          version: "26.0.3"
+      - name: Smoke-test the desktop app
+        shell: bash
+        env:
+          RUST_LOG: cronostack=info
+        run: |
+          binary="target/${{ matrix.target }}/release/cronostack"
+          case "${{ matrix.os }}" in
+            linux) xvfb-run -a -s "-screen 0 1280x1024x24" "$binary" --smoke-test ;;
+            macos) "$binary" --smoke-test ;;
+            windows) "$binary.exe" --smoke-test ;;
+          esac
+
+      - name: Package the binary
+        shell: bash
+        env:
+          CRONOSTACK_RELEASE_RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          archive=$(./scripts/package-release.sh "${{ matrix.target }}")
+          ./scripts/write-release-checksum.sh "$archive"
+      - name: Upload the binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cronostack-${{ matrix.target }}
+          path: target/distrib/cronostack-*
+          if-no-files-found: error
+
+  powershell-installer:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Parse the PowerShell installer
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path .\install.ps1),
+              [ref]$tokens,
+              [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) {
+              $errors | ForEach-Object { Write-Error $_ }
+              throw "install.ps1 contains PowerShell syntax errors"
+          }
