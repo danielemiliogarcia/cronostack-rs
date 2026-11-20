@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels that PR's older, still-running CI, so
+# superseded jobs don't hold scarce macOS runners. Runs on main always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   quality:
     runs-on: ubuntu-24.04
@@ -72,6 +78,10 @@ jobs:
             os: windows
             rustflags: -C target-feature=+crt-static
     runs-on: ${{ matrix.runner }}
+    # Counts from when a runner picks the job up (not queue time); a normal
+    # build takes under 10 minutes, so a hang fails fast instead of holding a
+    # runner for GitHub's default 6 hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
