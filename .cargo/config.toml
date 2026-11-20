@@ -1,0 +1,8 @@
+# Only use crate versions that have been on crates.io for at least 14 days,
+# so a freshly published (possibly compromised) release can't slip in.
+[registry]
+global-min-publish-age = "14 days"
+
+# Fail instead of silently picking a newer version if nothing old enough fits.
+[resolver]
+incompatible-publish-age = "deny"

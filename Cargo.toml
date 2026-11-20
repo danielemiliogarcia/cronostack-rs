@@ -1,0 +1,48 @@
+[package]
+name = "cronostack"
+version = "0.1.0"
+edition = "2024"
+description = "A desktop stack of chronometers, countdowns and alarms"
+rust-version = "1.100"
+keywords = ["timer", "stopwatch", "countdown", "egui"]
+categories = ["gui"]
+
+[features]
+default = ["tray"]
+# System tray icon (pure Rust KSNI backend on Linux, no GTK needed)
+tray = ["dep:tray-icon"]
+# Play sounds in-process with rodio (needs ALSA dev headers on Linux).
+# Without it, sounds are played with paplay/pw-play/aplay/ffplay, afplay or PowerShell.
+native-audio = ["dep:rodio"]
+
+[dependencies]
+chrono = "0.4.45"
+directories = "6.0.0"
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "accesskit", "clipboard", "default_fonts", "wayland", "x11"] }
+egui = "0.37.0"
+env_logger = { version = "0.11.11", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+log = "0.4.35"
+rodio = { version = "0.23.0", default-features = false, features = ["wav", "playback"], optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.2.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tray-icon = { version = "0.26.1", optional = true, default-features = false, features = ["ksni"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.26.1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+strip = true
+lto = "thin"
