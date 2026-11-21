@@ -1,0 +1,356 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the YubiKey-signed release tag
+        if: ${{ github.ref_type == 'tag' }}
+        run: ./scripts/verify-release-tag.sh
+      - name: Install the pinned stable Rust release compiler
+        shell: bash
+        run: |
+          rust_version=$(tr -d '[:space:]' < RUST_RELEASE_VERSION)
+          rustup toolchain install "$rust_version" --profile minimal --component clippy,rustfmt
+          rustup override set "$rust_version"
+      - name: Install ALSA headers (needed to lint the native-audio feature)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev
+      - name: Verify tag and release metadata
+        run: ./scripts/verify-release-metadata.sh
+      - name: Test
+        run: cargo test --all-targets --locked
+      - name: Lint
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            windows: false
+            rustflags: ""
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            windows: false
+            rustflags: ""
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            windows: false
+            rustflags: ""
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            windows: true
+            rustflags: -C target-feature=+crt-static
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned stable Rust release compiler
+        shell: bash
+        run: |
+          rust_version=$(tr -d '[:space:]' < RUST_RELEASE_VERSION)
+          rustup toolchain install "$rust_version" --profile minimal --target "${{ matrix.target }}"
+          rustup override set "$rust_version"
+      - name: Build
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release --target ${{ matrix.target }} --locked
+      - name: Smoke-test the native binary
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/cronostack"
+          if [[ "${{ matrix.windows }}" == true ]]; then binary="$binary.exe"; fi
+          test "$("$binary" --version)" = "cronostack $(tr -d '[:space:]' < VERSION)"
+          "$binary" --help >/dev/null
+      - name: Install a virtual display and software OpenGL (Linux)
+        if: ${{ !matrix.windows && runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth libgl1-mesa-dri libegl1 libxkbcommon-x11-0 libxcursor1 libxi6 libxrandr2
+      - name: Install software OpenGL (Windows)
+        if: ${{ matrix.windows }}
+        uses: ssciwr/setup-mesa-dist-win@2dfeaebfa514f74c2b8cd8d27108c31486d33e72 # v3.0.0
+        with:
+          version: "26.0.3"
+      - name: Smoke-test the desktop app
+        shell: bash
+        env:
+          RUST_LOG: cronostack=info
+        run: |
+          binary="target/${{ matrix.target }}/release/cronostack"
+          if [[ "${{ matrix.windows }}" == true ]]; then binary="$binary.exe"; fi
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            xvfb-run -a -s "-screen 0 1280x1024x24" "$binary" --smoke-test
+          else
+            "$binary" --smoke-test
+          fi
+      - name: Package the release archive
+        shell: bash
+        env:
+          CRONOSTACK_RELEASE_RUSTFLAGS: ${{ matrix.rustflags }}
+        run: |
+          archive=$(./scripts/package-release.sh "${{ matrix.target }}")
+          ./scripts/write-release-checksum.sh "$archive"
+      - name: Smoke-test the Unix installer
+        if: ${{ !matrix.windows }}
+        shell: bash
+        env:
+          CRONOSTACK_RELEASE_DIR: ${{ github.workspace }}/target/distrib
+          CRONOSTACK_INSTALL_DIR: ${{ runner.temp }}/cronostack-bin
+        run: |
+          CRONOSTACK_VERSION=$(tr -d '[:space:]' < VERSION) ./install.sh
+          test "$("$CRONOSTACK_INSTALL_DIR/cronostack" --version)" = "cronostack $(tr -d '[:space:]' < VERSION)"
+      - name: Smoke-test the Windows installer
+        if: ${{ matrix.windows }}
+        shell: pwsh
+        env:
+          CRONOSTACK_RELEASE_DIR: ${{ github.workspace }}\target\distrib
+          CRONOSTACK_INSTALL_DIR: ${{ runner.temp }}\cronostack-bin
+        run: |
+          $version = (Get-Content VERSION).Trim()
+          ./install.ps1 -Version $version
+          # cronostack.exe is a GUI-subsystem app: PowerShell only waits for it
+          # and captures its output when the output is piped (| Out-String).
+          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $version") { throw "installed binary smoke test failed" }
+      - name: Smoke-test automatic release discovery on Unix
+        if: ${{ !matrix.windows }}
+        shell: bash
+        env:
+          CRONOSTACK_INSTALL_DIR: ${{ runner.temp }}/cronostack-auto-bin
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          archive="cronostack-$version-${{ matrix.target }}.tar.gz"
+          fake_bin="$RUNNER_TEMP/cronostack-fake-gh-bin"
+          mkdir -p "$fake_bin"
+          cat > "$fake_bin/gh" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          case "${1:-}" in
+            api)
+              printf '%s\n' "$CRONOSTACK_TEST_VERSION"
+              ;;
+            attestation)
+              ;;
+            release)
+              destination=
+              shift
+              while (($#)); do
+                case "$1" in
+                  --dir)
+                    destination=$2
+                    shift 2
+                    ;;
+                  *) shift ;;
+                esac
+              done
+              test -n "$destination"
+              cp "$CRONOSTACK_TEST_RELEASE_DIR/$CRONOSTACK_TEST_ARCHIVE" "$destination/"
+              cp "$CRONOSTACK_TEST_RELEASE_DIR/SHA256SUMS" "$destination/"
+              ;;
+            *)
+              printf 'unexpected fake gh command: %s\n' "$*" >&2
+              exit 2
+              ;;
+          esac
+          EOF
+          chmod 0755 "$fake_bin/gh"
+          export CRONOSTACK_TEST_VERSION="$version"
+          export CRONOSTACK_TEST_ARCHIVE="$archive"
+          export CRONOSTACK_TEST_RELEASE_DIR="$GITHUB_WORKSPACE/target/distrib"
+          PATH="$fake_bin:$PATH" ./install.sh
+          test "$("$CRONOSTACK_INSTALL_DIR/cronostack" --version)" = "cronostack $version"
+      - name: Smoke-test automatic release discovery on Windows
+        if: ${{ matrix.windows }}
+        shell: pwsh
+        env:
+          CRONOSTACK_INSTALL_DIR: ${{ runner.temp }}\cronostack-auto-bin
+        run: |
+          $env:CRONOSTACK_TEST_VERSION = (Get-Content VERSION).Trim()
+          $env:CRONOSTACK_TEST_ARCHIVE = "cronostack-$env:CRONOSTACK_TEST_VERSION-${{ matrix.target }}.zip"
+          $env:CRONOSTACK_TEST_RELEASE_DIR = Join-Path $env:GITHUB_WORKSPACE "target\distrib"
+          function global:gh {
+              if ($args[0] -eq "api") {
+                  Write-Output $env:CRONOSTACK_TEST_VERSION
+                  $global:LASTEXITCODE = 0
+                  return
+              }
+              if ($args[0] -eq "attestation") {
+                  $global:LASTEXITCODE = 0
+                  return
+              }
+              if ($args[0] -eq "release") {
+                  $dirIndex = [Array]::IndexOf($args, "--dir")
+                  if ($dirIndex -lt 0 -or $dirIndex + 1 -ge $args.Count) {
+                      throw "fake gh release download did not receive --dir"
+                  }
+                  $destination = $args[$dirIndex + 1]
+                  Copy-Item (Join-Path $env:CRONOSTACK_TEST_RELEASE_DIR $env:CRONOSTACK_TEST_ARCHIVE) $destination
+                  Copy-Item (Join-Path $env:CRONOSTACK_TEST_RELEASE_DIR "SHA256SUMS") $destination
+                  $global:LASTEXITCODE = 0
+                  return
+              }
+              throw "unexpected fake gh command: $($args -join ' ')"
+          }
+          ./install.ps1
+          if ((& "$env:CRONOSTACK_INSTALL_DIR\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $env:CRONOSTACK_TEST_VERSION") {
+              throw "automatic-discovery installer smoke test failed"
+          }
+      - name: Upload the release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.target }}
+          path: target/distrib/cronostack-*
+          if-no-files-found: error
+
+  publish:
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs:
+      - verify
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download all platform archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Assemble and verify the release set
+        shell: bash
+        run: |
+          cp install.sh install.ps1 release/
+          test "$(find release -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)" -eq 4
+          (
+            cd release
+            sha256sum cronostack-* install.sh install.ps1 > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+      - name: Attest every published artifact
+        # Build attestations need a public repository (or Enterprise Cloud).
+        if: ${{ !github.event.repository.private }}
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*
+      - name: Create the GitHub release
+        shell: bash
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          gh release create "$version" \
+            --verify-tag \
+            --target "${{ github.sha }}" \
+            --title "cronostack $version" \
+            --generate-notes \
+            release/*
+
+  published-install-smoke:
+    name: Verify published install on ${{ matrix.target }}
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            windows: false
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            windows: false
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            windows: false
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            windows: true
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      attestations: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download, verify, and run the published Unix installer
+        if: ${{ !matrix.windows }}
+        shell: bash
+        run: |
+          version="$GITHUB_REF_NAME"
+          work="$RUNNER_TEMP/cronostack-published-installer"
+          install_dir="$RUNNER_TEMP/cronostack-published-bin"
+          mkdir -p "$work"
+          cd "$work"
+          gh release download "$version" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern install.sh
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)" != true ]]; then
+            gh attestation verify install.sh \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref "refs/tags/$version" \
+              --deny-self-hosted-runners
+          fi
+          CRONOSTACK_INSTALL_DIR="$install_dir" sh install.sh
+          test "$("$install_dir/cronostack" --version)" = "cronostack $version"
+      - name: Download, verify, and run the published Windows installer
+        if: ${{ matrix.windows }}
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME
+          $work = Join-Path $env:RUNNER_TEMP "cronostack-published-installer"
+          $installDir = Join-Path $env:RUNNER_TEMP "cronostack-published-bin"
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          & gh release download $version `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern install.ps1 `
+            --dir $work
+          if ($LASTEXITCODE -ne 0) { throw "published installer download failed" }
+          $installer = Join-Path $work "install.ps1"
+          $isPrivate = (& gh api "repos/$env:GITHUB_REPOSITORY" --jq .private | Out-String).Trim()
+          if ($isPrivate -ne "true") {
+            & gh attestation verify $installer `
+              --repo $env:GITHUB_REPOSITORY `
+              --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml" `
+              --source-ref "refs/tags/$version" `
+              --deny-self-hosted-runners
+            if ($LASTEXITCODE -ne 0) { throw "published installer attestation verification failed" }
+          }
+          & $installer -InstallDir $installDir
+          if ((& "$installDir\cronostack.exe" --version | Out-String).Trim() -ne "cronostack $version") {
+              throw "published installer smoke test failed"
+          }
