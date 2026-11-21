@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 
 - Web version: the same app compiled to WebAssembly, published at
@@ -16,9 +18,14 @@ All notable changes to this project are documented here. The format follows
 - CI builds the web version; every push to `main` publishes it to GitHub
   Pages.
 
+### Changed
+
+- The displays use the DSEG7 Classic Bold seven-segment font (SIL Open Font
+  License 1.1), with the unlit segments shown faintly like a real LCD.
+
 ## [0.1.0] - 2026-11-20
 
-First release.
+First release (withdrawn; its binaries are no longer published).
 
 ### Added
 

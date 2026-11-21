@@ -1,6 +1,6 @@
 [package]
 name = "cronostack"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A stack of chronometers, countdowns and alarms, for the desktop and the web"
 rust-version = "1.100"
