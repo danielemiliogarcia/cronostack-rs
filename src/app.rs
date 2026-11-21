@@ -1,7 +1,8 @@
 //! The main window.
 //!
 //! ```text
-//! [+] [Menu] [x] One at a time [v]   <- top bar (add, menu, option, hide)
+//! [+] [Menu] [x] One at a time [v]   <- top bar (add, menu, option, hide;
+//!                                        no hide button on the web)
 //! ┌──────────┐ │ ┌──────────┐
 //! │ column 1 │ │ │ column 2 │ ...    <- one column per stopwatch
 //! └──────────┘ │ └──────────┘
@@ -11,11 +12,16 @@
 //! - [`eframe::App::logic`]: timers, tray commands, saving. Also runs while
 //!   the window is hidden in the tray.
 //! - [`eframe::App::ui`]: drawing (only while visible).
+//!
+//! The same app runs on the web (WebAssembly). There the window is the
+//! browser page, so the tray, hiding and window resizing are left out.
 
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+// `std::time::Instant` panics on the web; `web_time` works everywhere.
+use web_time::Instant;
 
 use egui::{Rect, RichText, Vec2, ViewportCommand};
 
@@ -29,9 +35,14 @@ use crate::widgets::{self, Icons};
 /// Space between the window border and the content, in points.
 const MARGIN: i8 = 6;
 /// Window width when there are no columns.
+#[cfg(not(target_arch = "wasm32"))]
 const MIN_WIDTH: f32 = 220.0;
-/// Protects the times against crashes or the app being killed.
+/// Protects the times against crashes or the app being killed. On the web a
+/// tab can be closed at any moment without a chance to save, so save often.
+#[cfg(not(target_arch = "wasm32"))]
 const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
+#[cfg(target_arch = "wasm32")]
+const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(5);
 /// Frames `--smoke-test` renders before checking saving and quitting.
 const SMOKE_TEST_FRAMES: u32 = 30;
 
@@ -56,6 +67,7 @@ pub struct App {
     show_about: bool,
 
     /// Last size we asked the window to be, to only resize on changes.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     last_requested_size: Option<Vec2>,
     saved_on_close: bool,
     last_autosave: Instant,
@@ -71,13 +83,14 @@ impl App {
 
         let (tray_sender, tray_commands) = mpsc::channel();
         let tray = tray::create(ctx, tray_sender);
-        if tray.is_none() {
+        if tray.is_none() && cfg!(not(target_arch = "wasm32")) {
             log::info!("no system tray available; the hide button will minimize instead");
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         spawn_ticker(ctx.clone());
 
-        log::info!("state file: {}", store.path().display());
+        log::info!("state: {}", store.location());
         let state = store.load_or_default();
         state.theme.apply(ctx);
         let columns: Vec<Column> = state
@@ -223,6 +236,10 @@ impl App {
             ui.menu_button("Menu", |ui| self.main_menu(ui));
             ui.checkbox(&mut self.one_at_a_time, "One at a time")
                 .on_hover_text("Starting a stopwatch pauses all the others");
+            // On the web there's no window to hide.
+            if cfg!(target_arch = "wasm32") {
+                return;
+            }
             ui.add_space(8.0);
             let tip = if self.tray.is_some() {
                 "Hide to the system tray"
@@ -316,22 +333,35 @@ impl App {
     }
 
     fn data_location_dialog(&mut self, ctx: &egui::Context) {
-        let path = self.store.path().to_owned();
+        let location = self.store.location();
         let modal = egui::Modal::new(egui::Id::unique("data_location")).show(ctx, |ui| {
             ui.set_max_width(420.0);
             ui.heading("Where is my data?");
             ui.label("Your columns and settings are saved in:");
-            ui.add(egui::Label::new(RichText::new(path.display().to_string()).monospace()).wrap());
-            ui.label(RichText::new("Saved on exit and every 30 seconds.").weak());
+            ui.add(egui::Label::new(RichText::new(&location).monospace()).wrap());
+            if cfg!(target_arch = "wasm32") {
+                ui.label(
+                    RichText::new(
+                        "Saved every 5 seconds. It stays in this browser on this device; \
+                         clearing the site's data erases it.",
+                    )
+                    .weak(),
+                );
+            } else {
+                ui.label(RichText::new("Saved on exit and every 30 seconds.").weak());
+            }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Copy path").clicked() {
-                    ui.ctx().copy_text(path.display().to_string());
-                }
-                if let Some(dir) = path.parent()
-                    && ui.button("Open folder").clicked()
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    open_in_file_manager(dir);
+                    if ui.button("Copy path").clicked() {
+                        ui.ctx().copy_text(location.clone());
+                    }
+                    if let Some(dir) = self.store.folder()
+                        && ui.button("Open folder").clicked()
+                    {
+                        open_in_file_manager(dir);
+                    }
                 }
                 if ui.button("Close").clicked() {
                     self.show_data_location = false;
@@ -349,6 +379,13 @@ impl App {
             ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
             ui.label("Stopwatches, countdowns and alarms, side by side.");
             ui.label(RichText::new("by EE & FF").weak());
+            ui.add_space(4.0);
+            ui.hyperlink_to("Source code", env!("CARGO_PKG_REPOSITORY"));
+            ui.label(
+                RichText::new(format!("License: {}", env!("CARGO_PKG_LICENSE")))
+                    .small()
+                    .weak(),
+            );
             ui.add_space(8.0);
             if ui.button("Close").clicked() {
                 self.show_about = false;
@@ -360,6 +397,7 @@ impl App {
     }
 
     /// Resizes the window to fit `content` (in window coordinates).
+    #[cfg(not(target_arch = "wasm32"))]
     fn fit_window_to(&mut self, ctx: &egui::Context, content: Rect) {
         // Content starts at the top-left margin; add it once more for the
         // right and bottom.
@@ -414,7 +452,10 @@ impl eframe::App for App {
         if self.show_about {
             self.about_dialog(&ctx);
         }
+        #[cfg(not(target_arch = "wasm32"))]
         self.fit_window_to(&ctx, content);
+        #[cfg(target_arch = "wasm32")]
+        let _ = content; // the page decides the size on the web
 
         if let Some(frames) = &mut self.smoke_test_frames {
             *frames += 1;
@@ -433,6 +474,7 @@ impl eframe::App for App {
 /// Wakes the app 4 times per second from a background thread, so
 /// [`eframe::App::logic`] keeps running (and alarms ring) while the window
 /// is hidden and nothing else would trigger a frame.
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_ticker(ctx: egui::Context) {
     std::thread::spawn(move || {
         loop {
@@ -443,7 +485,8 @@ fn spawn_ticker(ctx: egui::Context) {
 }
 
 /// Opens a folder in the platform's file manager.
-fn open_in_file_manager(dir: &Path) {
+#[cfg(not(target_arch = "wasm32"))]
+fn open_in_file_manager(dir: &std::path::Path) {
     let program = if cfg!(target_os = "macos") {
         "open"
     } else if cfg!(windows) {

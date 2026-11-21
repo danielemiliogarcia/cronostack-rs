@@ -143,6 +143,38 @@ jobs:
           path: target/distrib/cronostack-*
           if-no-files-found: error
 
+  web:
+    name: Build the web version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the release Rust toolchain with the WebAssembly target
+        shell: bash
+        run: |
+          rust_version=$(tr -d '[:space:]' < RUST_RELEASE_VERSION)
+          rustup toolchain install "$rust_version" --profile minimal --component clippy --target wasm32-unknown-unknown
+          rustup override set "$rust_version"
+      - name: Lint the web build
+        run: cargo clippy --target wasm32-unknown-unknown --locked -- -D warnings
+      - name: Install trunk
+        run: ./scripts/install-trunk.sh "$RUNNER_TEMP/bin" && echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: trunk build --release --locked
+      - name: Check the site
+        shell: bash
+        run: |
+          test -f dist/index.html
+          ls dist/*_bg.wasm dist/*.js >/dev/null
+      - name: Upload the site
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cronostack-web
+          path: dist/
+          if-no-files-found: error
+
   powershell-installer:
     runs-on: windows-2025
     steps:

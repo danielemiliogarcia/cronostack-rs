@@ -5,6 +5,9 @@ also show a countdown, a daily alarm, the local time and project/developer
 labels. **Copy** puts `developer, time, date, project` on the clipboard as a
 spreadsheet row.
 
+**▶ Try it now in your browser, nothing to install:
+<https://danielemiliogarcia.github.io/cronostack-rs/>**
+
 ![CronoStack with the Classic theme](docs/screenshots/classic.png)
 
 <p align="center">
@@ -13,27 +16,64 @@ spreadsheet row.
 </p>
 
 Built in Rust with [egui/eframe](https://github.com/emilk/egui). Runs on
-Linux, macOS and Windows.
+Linux, macOS and Windows, and in any current browser (WebAssembly).
 
-## Install
+## Features
 
-### Option 1: install a binary release
+- Any number of columns: add with **+**, remove with the red **X**.
+- **One at a time:** starting a stopwatch pauses the others.
+- Per-column **settings** to show or hide: project, developer, clock, alarm,
+  stopwatch, countdown.
+- The window resizes to fit its columns.
+- **System tray:** hide the window, pause all, quit (desktop only).
+- **Menu:**
+  - **Theme:** *Classic* (light window, LCD-style displays) or *System*
+    (follows your OS light/dark setting).
+  - **Pause all.**
+  - **Where is my data?** shows where your data is saved.
+  - **About.**
+
+## Use it
+
+### Option 1: the web app (no install)
+
+Open **<https://danielemiliogarcia.github.io/cronostack-rs/>**. It's the same
+app compiled to WebAssembly and runs entirely in your browser: there's no
+server and no account, and your columns stay in the browser's local storage
+on your device.
+
+Compared with the desktop app:
+
+- No system tray, window hiding or auto-resizing.
+- Data is kept per browser and device (clearing site data erases it).
+- Sounds are synthesized by the browser (a pager-style beep for the alarm, a
+  short chime when a countdown ends). Browsers allow sound only after you've
+  clicked the page once.
+- Background tabs are throttled, so an alarm or countdown in a hidden tab may
+  ring late. Use the desktop app if you rely on the alarm.
+- Needs WebGL, which all current browsers have.
+
+### Option 2: install a verified binary release
 
 Rust is not needed. The installer downloads the archive for your platform,
-checks its SHA-256 and installs `cronostack`:
+verifies its GitHub build-provenance attestation and SHA-256, and installs
+`cronostack`:
 
 - Linux and macOS: to `~/.local/bin`
 - Windows: to `%LOCALAPPDATA%\cronostack\bin`
 
-The repository is private for now, so the
-[GitHub CLI](https://cli.github.com/) (`gh`), logged in with access to it, is
-needed to download releases.
+It uses the [GitHub CLI](https://cli.github.com/) (`gh`), logged in
+(`gh auth login`), to download and verify releases.
 
 Linux (x86-64, ARM64) and macOS (Apple silicon):
 
 ```bash
 gh release download --repo danielemiliogarcia/cronostack-rs --pattern install.sh --clobber
-sh install.sh            # latest release; or: sh install.sh 0.1.0
+gh attestation verify install.sh \
+  --repo danielemiliogarcia/cronostack-rs \
+  --signer-workflow danielemiliogarcia/cronostack-rs/.github/workflows/release.yml \
+  --deny-self-hosted-runners
+sh install.sh            # latest release; or a given one: sh install.sh 0.2.0
 rm install.sh
 ```
 
@@ -41,17 +81,21 @@ Windows (x86-64), in PowerShell:
 
 ```powershell
 gh release download --repo danielemiliogarcia/cronostack-rs --pattern install.ps1 --clobber
-./install.ps1            # latest release; or: ./install.ps1 -Version 0.1.0
+gh attestation verify install.ps1 `
+  --repo danielemiliogarcia/cronostack-rs `
+  --signer-workflow danielemiliogarcia/cronostack-rs/.github/workflows/release.yml `
+  --deny-self-hosted-runners
+./install.ps1            # latest release; or a given one: ./install.ps1 -Version 0.2.0
 Remove-Item install.ps1
 ```
 
-To install somewhere else, set `CRONOSTACK_INSTALL_DIR`. Once the repository
-is public, the installers also verify each archive's GitHub build-provenance
-attestation.
+To install somewhere else, set `CRONOSTACK_INSTALL_DIR`.
 
-**Manual download:** every
-[release](https://github.com/danielemiliogarcia/cronostack-rs/releases) has
-an archive per platform plus `SHA256SUMS`:
+### Option 3: download manually
+
+No tools needed. Every
+[release](https://github.com/danielemiliogarcia/cronostack-rs/releases/latest)
+has an archive per platform plus `SHA256SUMS`:
 
 | Platform | Archive |
 |---|---|
@@ -75,7 +119,7 @@ desktop install has these. The tray icon needs a desktop that shows tray icons
 (KDE, XFCE, or GNOME with the AppIndicator extension). Sounds are played with
 `paplay`, `pw-play`, `aplay` or `ffplay`, whichever is installed.
 
-### Option 2: build from source
+### Option 4: build from source
 
 ```bash
 # Uses the Rust toolchain pinned in rust-toolchain.toml (1.100.0);
@@ -85,25 +129,23 @@ cd cronostack-rs
 cargo install --locked --path .
 ```
 
-## Features
+To build and run the web version yourself:
 
-- Any number of columns: add with **+**, remove with the red **X**.
-- **One at a time:** starting a stopwatch pauses the others.
-- Per-column **settings** to show or hide: project, developer, clock, alarm,
-  stopwatch, countdown.
-- The window resizes to fit its columns.
-- **System tray:** hide the window, pause all, quit.
-- **Menu:**
-  - **Theme:** *Classic* (light window, LCD-style displays) or *System*
-    (follows your OS light/dark setting).
-  - **Pause all.**
-  - **Where is my data?** shows the file path, with *Copy path* and
-    *Open folder*.
-  - **About.**
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --locked trunk
+trunk serve --open          # development server with live reload
+trunk build --release       # static site in dist/, ready to host anywhere
+```
+
+`dist/` is a plain static site (HTML, JavaScript and a `.wasm` file), so any
+static host works: GitHub Pages, Netlify, Cloudflare Pages… If it's served
+from a subfolder, build with `--public-url /subfolder/`.
 
 ## Data
 
-State is saved as TOML on exit and every 30 seconds, in the OS data folder:
+The desktop app saves its state as TOML on exit and every 30 seconds, in the
+OS data folder:
 
 | OS      | path |
 |---------|------|
@@ -114,6 +156,9 @@ State is saved as TOML on exit and every 30 seconds, in the OS data folder:
 Set `CRONOSTACK_DATA_DIR` to use another folder (e.g. for a portable install).
 Stopwatches are paused when the app quits. If the file can't be read, it's
 renamed to `state.toml.broken` and the app starts empty.
+
+The web app saves the same TOML in the browser's local storage every 5
+seconds.
 
 ## Command line
 
@@ -143,6 +188,7 @@ Icons, font and sounds are embedded in the binary.
 ```bash
 cargo test
 cargo clippy --all-targets -- -D warnings
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all
 ```
 
@@ -151,21 +197,39 @@ been on crates.io for at least 14 days, and CI builds with `--locked` from the
 committed `Cargo.lock`.
 
 **CI.** Every pull request and push to `main` runs formatting, lints and
-tests. It also builds the four release targets, runs `--smoke-test` on each
-(with a virtual display and software OpenGL on Linux and Windows), and uploads
-the binaries as artifacts.
+tests. It builds the four desktop targets, runs `--smoke-test` on each (with a
+virtual display and software OpenGL on Linux and Windows), builds the web
+version, and uploads everything as artifacts.
+
+**Web app.** Every push to `main` rebuilds the web version and publishes it
+to GitHub Pages ([`pages.yml`](.github/workflows/pages.yml)).
 
 **Releases.** See [RELEASING.md](RELEASING.md). They're published only from a
 YubiKey-signed version tag.
 
 | module          | what it does |
 |-----------------|--------------|
-| `main.rs`       | command line, starts the app |
+| `main.rs`       | picks the desktop or web entry point |
+| `desktop.rs`    | desktop: command line, native window |
+| `web.rs`        | web: runs the app in the page's canvas |
 | `app.rs`        | main window: top bar, menu, dialogs, tray commands, saving, auto-resize |
 | `column/`       | one column: `stopwatch.rs`, `countdown.rs`, `alarm.rs` (logic, unit tested) and `ui.rs` (drawing) |
-| `persistence.rs`| `AppState` ↔ TOML file |
+| `persistence.rs`| `AppState` ↔ TOML (file on the desktop, local storage on the web) |
 | `theme.rs`      | `ThemeMode` (Classic/System) and the `Palette` used by widgets |
 | `clock.rs`      | time helpers |
-| `sound.rs`      | alarm and countdown-end sounds |
+| `sound.rs`      | alarm and countdown sounds (sound files on the desktop, synthesized on the web) |
 | `tray.rs`       | tray icon and menu |
 | `widgets.rs`    | shared widgets, embedded icons and font |
+
+Contributions are welcome: open an issue or a pull request.
+
+## Credits
+
+- Display font: [DSEG7 Classic](https://github.com/keshikan/DSEG) by
+  keshikan, under the SIL Open Font License 1.1
+  ([`assets/fonts/DSEG-LICENSE.txt`](assets/fonts/DSEG-LICENSE.txt)).
+
+## License
+
+CronoStack is licensed under the [Apache License 2.0](LICENSE). The bundled
+font keeps its own license (see Credits).

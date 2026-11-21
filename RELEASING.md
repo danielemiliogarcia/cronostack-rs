@@ -12,8 +12,7 @@ A release is published by pushing a **YubiKey-signed, annotated version tag**
 4. Builds each target natively, runs the command-line and GUI smoke tests,
    packages the archive and tests the installers.
 5. Publishes the GitHub Release only if every target succeeds. Each published
-   file gets a build-provenance attestation once the repository is public
-   (GitHub only offers attestations for public repositories).
+   file gets a GitHub build-provenance attestation.
 6. Downloads and runs the published installer on every platform.
 
 ## Targets
@@ -29,10 +28,13 @@ A release is published by pushing a **YubiKey-signed, annotated version tag**
   redistributable is needed.
 - macOS notarization and Windows Authenticode signing are not configured yet.
 
-Each archive contains the binary, `README.md`, `CHANGELOG.md`, `LICENSE`
-(once there is one), the license files of every bundled dependency
-(`THIRD_PARTY_LICENSES/`), and a `RELEASE-MANIFEST.txt` with the version,
+Each archive contains the binary, `README.md`, `CHANGELOG.md`, `LICENSE`,
+the license files of every bundled dependency and of the
+display font (`THIRD_PARTY_LICENSES/`), and a `RELEASE-MANIFEST.txt` with the version,
 target, compiler and source commit.
+
+The web app isn't part of a release: the [Web app workflow](.github/workflows/pages.yml)
+publishes it to GitHub Pages on every push to `main`.
 
 ## Compiler and dependencies
 

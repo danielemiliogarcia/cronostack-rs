@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CronoStack</title>
+
+  <!-- Built by trunk (https://trunkrs.dev): compiles the crate to WebAssembly.
+       wasm-opt gets the WebAssembly features Rust targets by default, which
+       every current browser supports. -->
+  <link data-trunk rel="rust" data-wasm-opt="z"
+        data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals --enable-reference-types --enable-multivalue">
+  <link data-trunk rel="icon" href="assets/icons/app.png">
+
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #f8f8f8;
+    }
+    /* The app draws everything inside this canvas. */
+    #cronostack_canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="cronostack_canvas"></canvas>
+</body>
+</html>

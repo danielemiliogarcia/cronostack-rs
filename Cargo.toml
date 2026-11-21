@@ -2,8 +2,12 @@
 name = "cronostack"
 version = "0.1.0"
 edition = "2024"
-description = "A desktop stack of chronometers, countdowns and alarms"
+description = "A stack of chronometers, countdowns and alarms, for the desktop and the web"
 rust-version = "1.100"
+license = "Apache-2.0"
+repository = "https://github.com/danielemiliogarcia/cronostack-rs"
+homepage = "https://danielemiliogarcia.github.io/cronostack-rs/"
+readme = "README.md"
 keywords = ["timer", "stopwatch", "countdown", "egui"]
 categories = ["gui"]
 
@@ -17,22 +21,32 @@ native-audio = ["dep:rodio"]
 
 [dependencies]
 chrono = "0.4.45"
-directories = "6.0.0"
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "accesskit", "clipboard", "default_fonts", "wayland", "x11"] }
 egui = "0.37.0"
-env_logger = { version = "0.11.11", default-features = false }
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 log = "0.4.35"
-rodio = { version = "0.23.0", default-features = false, features = ["wav", "playback"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
 toml = "1.2.1"
+web-time = "1.1.0"
+
+# Desktop only.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+directories = "6.0.0"
+env_logger = { version = "0.11.11", default-features = false }
+rodio = { version = "0.23.0", default-features = false, features = ["wav", "playback"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { version = "0.26.1", optional = true, default-features = false, features = ["ksni"] }
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 tray-icon = { version = "0.26.1", optional = true }
+
+# Web (WebAssembly) only.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.130"
+wasm-bindgen-futures = "0.4.80"
+web-sys = { version = "0.3.107", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Storage", "AudioContext", "BaseAudioContext", "AudioNode", "AudioDestinationNode", "AudioParam", "AudioScheduledSourceNode", "GainNode", "OscillatorNode", "OscillatorType"] }
 
 [dev-dependencies]
 tempfile = "3"

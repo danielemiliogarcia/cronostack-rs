@@ -1,23 +1,25 @@
-//! System tray icon with "Show / Hide", "Stop All" and "Exit".
+//! System tray icon with "Show / Hide", "Pause all" and "Exit" (desktop only).
 //!
 //! On Linux the pure-Rust StatusNotifierItem (KSNI) backend is used, so no
-//! GTK libraries are needed.
+//! GTK libraries are needed. On the web, [`create`] always returns `None`.
 
 use std::sync::mpsc::Sender;
 
 #[derive(Debug, Clone, Copy)]
+// Never sent on the web, where there's no tray.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub enum TrayCommand {
     Toggle,
     PauseAll,
     Exit,
 }
 
-#[cfg(feature = "tray")]
+#[cfg(all(feature = "tray", not(target_arch = "wasm32")))]
 pub struct Tray {
     _icon: tray_icon::TrayIcon,
 }
 
-#[cfg(feature = "tray")]
+#[cfg(all(feature = "tray", not(target_arch = "wasm32")))]
 pub fn create(ctx: &egui::Context, tx: Sender<TrayCommand>) -> Option<Tray> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
     use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -95,10 +97,10 @@ pub fn create(ctx: &egui::Context, tx: Sender<TrayCommand>) -> Option<Tray> {
     Some(Tray { _icon: tray })
 }
 
-#[cfg(not(feature = "tray"))]
+#[cfg(any(not(feature = "tray"), target_arch = "wasm32"))]
 pub struct Tray;
 
-#[cfg(not(feature = "tray"))]
+#[cfg(any(not(feature = "tray"), target_arch = "wasm32"))]
 pub fn create(_ctx: &egui::Context, _tx: Sender<TrayCommand>) -> Option<Tray> {
     None
 }
