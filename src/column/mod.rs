@@ -105,7 +105,7 @@ impl Column {
         if self.countdown.check_finished(now) {
             sound::play_countdown_end();
         }
-        self.alarm.check(local_time);
+        self.alarm.check(now, local_time);
     }
 
     /// Text for the "Copy" button: one tab-separated row

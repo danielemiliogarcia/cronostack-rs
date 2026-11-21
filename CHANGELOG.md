@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Web version: the same app compiled to WebAssembly, published at
+  <https://danielemiliogarcia.github.io/cronostack-rs/>. Data is kept in the
+  browser's local storage and the sounds are synthesized in the browser.
+- Open source under the Apache License 2.0. The About dialog links to the
+  source code.
+- CI builds the web version; every push to `main` publishes it to GitHub
+  Pages.
+
 ## [0.1.0] - 2026-11-20
 
 First release.

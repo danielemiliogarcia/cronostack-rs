@@ -16,8 +16,10 @@ pub const ZERO_TIME: &str = "00:00:00";
 
 /// Current wall-clock time in milliseconds since the Unix epoch.
 pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    // `web_time` is `std::time` on desktop and the browser clock on the web
+    // (where `std::time::SystemTime::now()` panics).
+    web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }

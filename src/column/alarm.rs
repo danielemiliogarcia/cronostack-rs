@@ -11,7 +11,7 @@ pub struct Alarm {
     /// True while we're inside the alarm's second and already rang, so it
     /// doesn't start again on every frame of that same second.
     rang_this_second: bool,
-    /// Plays the beeps in a background thread.
+    /// Plays the beeps (see `sound.rs`).
     player: AlarmPlayer,
 }
 
@@ -46,8 +46,9 @@ impl Alarm {
         }
     }
 
-    /// Call regularly with the current local time (`HH:MM:SS`).
-    pub fn check(&mut self, local_time: &str) {
+    /// Call regularly with the current time and local time (`HH:MM:SS`).
+    pub fn check(&mut self, now: i64, local_time: &str) {
+        self.player.poll(now);
         if self.enabled && local_time == self.time {
             if !self.rang_this_second {
                 self.rang_this_second = true;
@@ -59,7 +60,7 @@ impl Alarm {
     }
 
     /// Silences the alarm (used when the chronometer is removed).
-    pub fn silence(&self) {
+    pub fn silence(&mut self) {
         self.player.stop();
     }
 }
